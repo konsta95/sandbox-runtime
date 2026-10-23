@@ -1,0 +1,59 @@
+name: macOS flake validation (fork only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['macos-flakes-20261023']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: macOS flakes (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, macos-15-intel]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.2'
+      - name: Install dependencies and build
+        run: |
+          brew install ripgrep zsh
+          npm ci --ignore-scripts
+          npm run build
+      - name: Check the validation instrument
+        run: python3 .github/scripts/macos-flakes.py --selftest
+      - name: Observe the old-code failure and repeat the fixed tests
+        run: python3 .github/scripts/macos-flakes.py --out "$RUNNER_TEMP/macos-flakes" --runner '${{ matrix.runner }}'
+      - name: Show counts and coverage limits
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/macos-flakes/summary.json" ]; then
+            cat "$RUNNER_TEMP/macos-flakes/summary.json"
+            cat "$RUNNER_TEMP/macos-flakes/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: macos-flakes-${{ matrix.runner }}
+          path: |
+            ${{ runner.temp }}/macos-flakes/*.log
+            ${{ runner.temp }}/macos-flakes/*.xml
+            ${{ runner.temp }}/macos-flakes/*.json*
+            ${{ runner.temp }}/macos-flakes/*.md
+            ${{ runner.temp }}/macos-flakes/old-code/src
+            ${{ runner.temp }}/macos-flakes/old-code/test
+            ${{ runner.temp }}/macos-flakes/old-code/package.json
+          if-no-files-found: error
+          retention-days: 14
